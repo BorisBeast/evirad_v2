@@ -1,14 +1,20 @@
-#include <QCoreApplication>
 #include "mainapp.h"
+
+#include <QCoreApplication>
 #include <QObject>
 #include <QLocale>
 #include <QSocketNotifier>
 #include <QThread>
+
+#ifdef Q_OS_LINUX
 #include <signal.h>
 #include <unistd.h>
 #include <sys/socket.h>
+#endif
 
 MainApp *app;
+
+#ifdef Q_OS_LINUX
 int sigIntFd[2];
 QSocketNotifier *snInt;
 
@@ -33,6 +39,7 @@ int setupUnixSignalHandler()
 
     return 0;
 }
+#endif
 
 void TekstLoger(QtMsgType type, const QMessageLogContext &context, const QString &msg)
 {
@@ -95,6 +102,7 @@ int main(int argc, char *argv[])
 
     app = new MainApp();
 
+#ifdef Q_OS_LINUX
     if (::socketpair(AF_UNIX, SOCK_STREAM, 0, sigIntFd))
            qCritical("Couldn't create SIGINT socketpair");
     else
@@ -104,6 +112,7 @@ int main(int argc, char *argv[])
         snInt = new QSocketNotifier(sigIntFd[1], QSocketNotifier::Read, app);
         QObject::connect(snInt, SIGNAL(activated(int)), app, SLOT(handleSigInt()));
     }
+#endif
 
     int ret = a.exec();
 

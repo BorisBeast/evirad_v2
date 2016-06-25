@@ -1,8 +1,13 @@
 #ifndef MAINAPP_H
 #define MAINAPP_H
 
+#include "kontroler.h"
+#include "citac.h"
+#include "socket.h"
+
 #include <QObject>
 #include <QSqlDatabase>
+#include <QTimer>
 #include <QtWebSockets/qwebsocket.h>
 #include <QtWebSockets/qwebsocketserver.h>
 
@@ -35,6 +40,11 @@ private:
     QWebSocketServer* webSocketServer;
     QList<QWebSocket*> clients;
     int wsPort;
+
+    int lokacija;
+    QHash<uint,Socket*> sockets;
+    QHash<uint,Kontroler*> kontroleri;
+    QHash<uint,Citac*> citaci;
 };
 
 #endif // MAINAPP_H

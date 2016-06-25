@@ -1,11 +1,16 @@
 #include "mainapp.h"
 #include "processmanager.h"
+#include "udpsocket.h"
+#include "portserial.h"
+
 #include <QDebug>
 #include <QCoreApplication>
 #include <QSettings>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QMetaMethod>
+#include <QJsonDocument>
+#include <QJsonObject>
 
 MainApp::MainApp(QObject *parent) : QObject(parent)
 {
@@ -16,17 +21,20 @@ MainApp::MainApp(QObject *parent) : QObject(parent)
     QString key_db_name="DB/Name";
     QString key_db_user="DB/User";
     QString key_db_password="DB/Password";
+    QString key_system_lokacija="System/Lokacija";
 
     QSettings settings(QCoreApplication::applicationDirPath() + "/settings.ini", QSettings::IniFormat);
     if(!settings.contains(key_db_host)) settings.setValue(key_db_host, QString("localhost"));
     if(!settings.contains(key_db_name)) settings.setValue(key_db_name, QString("evirad_v2"));
     if(!settings.contains(key_db_user)) settings.setValue(key_db_user, QString("root"));
     if(!settings.contains(key_db_password)) settings.setValue(key_db_password, QString("sifrasifra"));
+    if(!settings.contains(key_system_lokacija)) settings.setValue(key_system_lokacija, 1);
 
     QString dbHost = settings.value(key_db_host).toString();
     QString dbName = settings.value(key_db_name).toString();
     QString dbUser = settings.value(key_db_user).toString();
     QString dbPassword = settings.value(key_db_password).toString();
+    lokacija = settings.value(key_system_lokacija).toInt();
 
     QSqlDatabase db = QSqlDatabase::addDatabase("QMYSQL");
     db.setHostName(dbHost);
@@ -60,6 +68,72 @@ MainApp::MainApp(QObject *parent) : QObject(parent)
 
     ProcessManager* shell = new ProcessManager(this);
     shell->setObjectName("shell");
+
+
+    QSqlQuery query;
+    query.prepare("SELECT id, naziv, tip, funkcija, parametri FROM socket WHERE lokacija = :lokacija");
+    query.bindValue(":lokacija", lokacija);
+    query.exec();
+    while(query.next())
+    {
+        uint id = query.value("id").toUInt();
+        QString naziv = query.value("naziv").toString();
+        char tip = query.value("tip").toString().at(0).toLatin1();
+        //char funkcija = query.value("funkcija").toString().at(0).toLatin1();
+        QJsonDocument doc = QJsonDocument::fromJson(query.value("parametri").toString().toUtf8());
+        QJsonObject parametri = doc.object();
+
+        Socket* socket;
+
+        if(tip=='u')
+        {
+            UdpSocket* udpSocket = new UdpSocket(this);
+            udpSocket->setObjectName(naziv.replace(" ","_"));
+            udpSocket->setAddress(parametri["address"].toString());
+            udpSocket->setPort(parametri["port"].toInt());
+            socket = udpSocket;
+        }
+        else if(tip=='s')
+        {
+            PortSerial* serialSocket = new PortSerial(this);
+            serialSocket->setObjectName(naziv.replace(" ","_"));
+            serialSocket->setAddress(parametri["address"].toString());
+            serialSocket->setBaudRate(parametri["baud"].toInt());
+            serialSocket->start();
+            socket = serialSocket;
+        }
+
+        sockets.insert(id,socket);
+    }
+    query.clear();
+
+
+    query.prepare("SELECT id, naziv, socket, adresa, lokacija, tip_brave, trajanje_otvaranja, ulazi_maska FROM kontroler WHERE lokacija = :lokacija");
+    query.bindValue(":lokacija", lokacija);
+    query.exec();
+    while(query.next())
+    {
+        uint id = query.value("id").toUInt();
+        Kontroler* kontroler = new Kontroler(this);
+
+        kontroleri.insert(id,kontroler);
+    }
+    query.clear();
+
+    query.prepare("SELECT id, naziv, funkcija, zona, lokacija, kontroler, socket, adresa FROM citac WHERE lokacija = :lokacija");
+    query.bindValue(":lokacija", lokacija);
+    query.exec();
+    while(query.next())
+    {
+        uint id = query.value("id").toUInt();
+        uint socket = query.value("socket").toUInt();
+        Citac* citac = new Citac(this);
+
+        connect(sockets[socket],SIGNAL(received(QByteArray)),citac,SLOT(received(QByteArray)));
+
+        citaci.insert(id,citac);
+    }
+    query.clear();
 }
 
 MainApp::~MainApp()
@@ -242,4 +316,10 @@ void MainApp::webSocketDisconnected()
 void MainApp::wsServerClosed()
 {
     qInfo() << "Server closed!!";
+}
+
+void MainApp::quitApp(int returnCode)
+{
+    qDebug()<<"Exiting with return code"<<returnCode;
+    QCoreApplication::exit(returnCode);
 }
