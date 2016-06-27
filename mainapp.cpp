@@ -2,6 +2,8 @@
 #include "processmanager.h"
 #include "udpsocket.h"
 #include "portserial.h"
+#include "socketmonitor.h"
+#include "accesscontrol.h"
 
 #include <QDebug>
 #include <QCoreApplication>
@@ -11,6 +13,7 @@
 #include <QMetaMethod>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QRegularExpression>
 
 MainApp::MainApp(QObject *parent) : QObject(parent)
 {
@@ -103,33 +106,66 @@ MainApp::MainApp(QObject *parent) : QObject(parent)
             socket = serialSocket;
         }
 
+        SocketMonitor* socMon = new SocketMonitor(this);
+        socMon->setSocketName(socket->objectName());
+        connect(socket,SIGNAL(received(QByteArray)),socMon,SLOT(received(QByteArray)));
+        connect(socket,SIGNAL(sent(QByteArray)),socMon,SLOT(sent(QByteArray)));
         sockets.insert(id,socket);
     }
     query.clear();
 
 
-    query.prepare("SELECT id, naziv, socket, adresa, lokacija, tip_brave, trajanje_otvaranja, ulazi_maska FROM kontroler WHERE lokacija = :lokacija");
+    query.prepare("SELECT id, naziv, socket, adresa, tip_brave, trajanje_otvaranja, ulazi_maska FROM kontroler WHERE lokacija = :lokacija");
     query.bindValue(":lokacija", lokacija);
     query.exec();
     while(query.next())
     {
         uint id = query.value("id").toUInt();
-        Kontroler* kontroler = new Kontroler(this);
+        QString naziv = query.value("naziv").toString();
+        uint socket = query.value("socket").toUInt();
+        QString adresa = query.value("adresa").toString();
+        char tipBrave = query.value("tip_brave").toString().at(0).toLatin1();
+        Kontroler* kontroler = new Kontroler(adresa, tipBrave, this);
+        kontroler->setObjectName(naziv.replace(" ","_"));
+
+        connect(sockets[socket],SIGNAL(received(QByteArray)),kontroler,SLOT(received(QByteArray)));
+        connect(kontroler,SIGNAL(write(QByteArray)),sockets[socket],SLOT(write(QByteArray)));
 
         kontroleri.insert(id,kontroler);
     }
     query.clear();
 
-    query.prepare("SELECT id, naziv, funkcija, zona, lokacija, kontroler, socket, adresa FROM citac WHERE lokacija = :lokacija");
+    query.prepare("SELECT id, naziv, funkcija, zona, kontroler, socket, adresa FROM citac WHERE lokacija = :lokacija");
     query.bindValue(":lokacija", lokacija);
     query.exec();
     while(query.next())
     {
         uint id = query.value("id").toUInt();
+        QString naziv = query.value("naziv").toString();
+        char funkcija = query.value("funkcija").toString().at(0).toLatin1();
+        uint zona = query.value("zona").toUInt();
+        uint kontroler = query.value("kontroler").toUInt();
         uint socket = query.value("socket").toUInt();
-        Citac* citac = new Citac(this);
+        QString adresa = query.value("adresa").toString();
 
-        connect(sockets[socket],SIGNAL(received(QByteArray)),citac,SLOT(received(QByteArray)));
+        Citac* citac;
+        if(funkcija=='u' || funkcija=='i')
+        {
+            citac = new Citac(adresa, this);
+            citac->setObjectName(naziv.replace(" ","_"));
+
+            connect(sockets[socket],SIGNAL(received(QByteArray)),citac,SLOT(received(QByteArray)));
+            connect(citac,SIGNAL(write(QByteArray)),sockets[socket],SLOT(write(QByteArray)));
+
+            if(kontroler!=0)
+            {
+                AccessControl* ac = new AccessControl(id,funkcija,zona,lokacija,this);
+                connect(citac,SIGNAL(cardRead(QByteArray)),ac,SLOT(cardRead(QByteArray)));
+                connect(ac,SIGNAL(accessDenied()),citac,SLOT(signalDenied()));
+                connect(ac,SIGNAL(accessGranted()),citac,SLOT(signalGranted()));
+                connect(ac,SIGNAL(accessGranted()),kontroleri[kontroler],SLOT(openDoor()));
+            }
+        }
 
         citaci.insert(id,citac);
     }
@@ -188,6 +224,13 @@ void MainApp::processWsMessage(QString message)
     QStringList words;
     QString word="";
     bool quote = false;
+
+    int pos = 0;
+    QRegExp rx("[^\\\\](\\\\r)"); while ((pos = rx.indexIn(message)) != -1) {message.replace(pos+1, 2, "\r");}
+    rx = QRegExp("[^\\\\](\\\\n)"); while ((pos = rx.indexIn(message)) != -1) {message.replace(pos+1, 2, "\n");}
+    rx = QRegExp("[^\\\\](\\\\t)"); while ((pos = rx.indexIn(message)) != -1) {message.replace(pos+1, 2, "\t");}
+    message.replace("\\\\","\\");
+
     for(int i=0; i<message.length(); i++)    //TODO: dodaj escape za quote!!     //TODO: dodaj { } za niz u stringu
     {
         QChar ch = message.at(i);

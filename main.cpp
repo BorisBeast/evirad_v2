@@ -11,6 +11,10 @@
 #include <unistd.h>
 #include <sys/socket.h>
 #endif
+#ifdef Q_OS_WIN
+#include <windows.h>
+#include <stdio.h>
+#endif
 
 MainApp *app;
 
@@ -40,7 +44,22 @@ int setupUnixSignalHandler()
     return 0;
 }
 #endif
+#ifdef Q_OS_WIN
+BOOL CtrlHandler( DWORD fdwCtrlType )
+{
+    switch( fdwCtrlType )
+    {
+    // Handle the CTRL-C signal.
+    case CTRL_C_EVENT:
+      printf( "Ctrl-C event\n\n" );
+      app->handleSigInt();
+      return( TRUE );
 
+    default:
+      return FALSE;
+    }
+}
+#endif
 void TekstLoger(QtMsgType type, const QMessageLogContext &context, const QString &msg)
 {
     Q_UNUSED(context);
@@ -112,6 +131,9 @@ int main(int argc, char *argv[])
         snInt = new QSocketNotifier(sigIntFd[1], QSocketNotifier::Read, app);
         QObject::connect(snInt, SIGNAL(activated(int)), app, SLOT(handleSigInt()));
     }
+#endif
+#ifdef Q_OS_WIN
+    if( !SetConsoleCtrlHandler( (PHANDLER_ROUTINE) CtrlHandler, TRUE ) ) qCritical("Could not set control handler");
 #endif
 
     int ret = a.exec();

@@ -9,7 +9,16 @@ void PortSerial::read(QByteArray data)
     Q_EMIT received(data);
 }
 
-
+PortSerial::~PortSerial()
+{
+    close();  //zatvori port
+    if(!portThread.wait(5000)) //Wait until it actually has terminated (max. 5 sec)
+    {
+        qCritical()<<objectName()<<"Thread deadlock detected, bad things may happen !!!";
+        portThread.terminate(); //Thread didn't exit in time, probably deadlocked, terminate it!
+        portThread.wait(); //Note: We have to wait again here!
+    }
+}
 
 void PortSerial::run()
 {

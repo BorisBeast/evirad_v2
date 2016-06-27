@@ -20,6 +20,7 @@
 #endif
 #ifdef PORTSERIAL_COM
     #include <windows.h>
+    #include <unistd.h>
 #endif
 
 //------------------------------------------- TTY -------------------------------------------
@@ -51,6 +52,7 @@ class PortSerial : public Socket
 public:
     enum State {Unknown = 0, Closed, Closing, Opening, Opened};
     Q_INVOKABLE PortSerial(QObject *parent = 0);
+    ~PortSerial();
 
 public:
     QString getAddress();
@@ -115,7 +117,6 @@ private:
     COMMTIMEOUTS timeouts;
 #endif
 };
-
 
 #endif // PORTSERIAL_H
 

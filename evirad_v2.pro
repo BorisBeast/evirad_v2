@@ -16,14 +16,16 @@ SOURCES += main.cpp \
     processmanager.cpp \
     citac.cpp \
     kontroler.cpp \
-    accesscontrol.cpp
+    accesscontrol.cpp \
+    socketmonitor.cpp
 
 HEADERS += \
     mainapp.h \
     processmanager.h \
     citac.h \
     kontroler.h \
-    accesscontrol.h
+    accesscontrol.h \
+    socketmonitor.h
 
 target.path = /home/pi/Projekti
 INSTALLS += target
