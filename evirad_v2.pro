@@ -17,7 +17,9 @@ SOURCES += main.cpp \
     citac.cpp \
     kontroler.cpp \
     accesscontrol.cpp \
-    socketmonitor.cpp
+    socketmonitor.cpp \
+    syncserver.cpp \
+    syncclient.cpp
 
 HEADERS += \
     mainapp.h \
@@ -25,7 +27,9 @@ HEADERS += \
     citac.h \
     kontroler.h \
     accesscontrol.h \
-    socketmonitor.h
+    socketmonitor.h \
+    syncserver.h \
+    syncclient.h
 
 target.path = /home/pi/Projekti
 INSTALLS += target

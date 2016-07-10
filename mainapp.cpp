@@ -4,6 +4,7 @@
 #include "portserial.h"
 #include "socketmonitor.h"
 #include "accesscontrol.h"
+#include "syncserver.h"
 
 #include <QDebug>
 #include <QCoreApplication>
@@ -82,7 +83,7 @@ MainApp::MainApp(QObject *parent) : QObject(parent)
         uint id = query.value("id").toUInt();
         QString naziv = query.value("naziv").toString();
         char tip = query.value("tip").toString().at(0).toLatin1();
-        //char funkcija = query.value("funkcija").toString().at(0).toLatin1();
+        char funkcija = query.value("funkcija").isNull()?0:query.value("funkcija").toString().at(0).toLatin1();
         QJsonDocument doc = QJsonDocument::fromJson(query.value("parametri").toString().toUtf8());
         QJsonObject parametri = doc.object();
 
@@ -104,6 +105,17 @@ MainApp::MainApp(QObject *parent) : QObject(parent)
             serialSocket->setBaudRate(parametri["baud"].toInt());
             serialSocket->start();
             socket = serialSocket;
+        }
+
+        if(funkcija=='S')   //TODO: promijeni sve ovo
+        {
+            SyncServer* syncServer = new SyncServer(2,this);
+            syncServer->setObjectName("sync_server");
+            connect(socket, SIGNAL(received(QByteArray)), syncServer, SLOT(received(QByteArray)));
+            connect(syncServer, SIGNAL(write(QByteArray)), socket, SLOT(write(QByteArray)));
+        }
+        else if(funkcija=='s')
+        {
         }
 
         SocketMonitor* socMon = new SocketMonitor(this);
@@ -223,20 +235,24 @@ void MainApp::processWsMessage(QString message)
 
     QStringList words;
     QString word="";
-    bool quote = false;
+    //bool quote = false;
+    bool escape = false;
 
     int pos = 0;
     QRegExp rx("[^\\\\](\\\\r)"); while ((pos = rx.indexIn(message)) != -1) {message.replace(pos+1, 2, "\r");}
     rx = QRegExp("[^\\\\](\\\\n)"); while ((pos = rx.indexIn(message)) != -1) {message.replace(pos+1, 2, "\n");}
     rx = QRegExp("[^\\\\](\\\\t)"); while ((pos = rx.indexIn(message)) != -1) {message.replace(pos+1, 2, "\t");}
-    message.replace("\\\\","\\");
+    //message.replace("\\\\","\\");
 
-    for(int i=0; i<message.length(); i++)    //TODO: dodaj escape za quote!!     //TODO: dodaj { } za niz u stringu
+    for(int i=0; i<message.length(); i++)    //TODO: dodaj { } za definisanje niza
     {
         QChar ch = message.at(i);
-        if(ch==' ' && !quote){ if(word!="") words<<word; word="";}
-        else if(ch=='"') quote=quote?false:true;
-        else word+=ch;
+        if(ch=='\\') escape=!escape;
+
+        if(ch==' ' && !escape){ if(word!="") words<<word; word="";}
+        else if(!escape || ch==' ') word+=ch;
+
+        if(ch!='\\') escape=false;
     }
     if(word!="") words<<word;
 
