@@ -9,7 +9,7 @@ class SyncServer : public QObject
 {
     Q_OBJECT
 public:
-    explicit SyncServer(uint lokacija, QObject *parent = 0);
+    explicit SyncServer(QObject *parent = 0);
 
 signals:
     void write(QByteArray data);
@@ -24,7 +24,7 @@ private:
     void parseData(QString data);
     QString getLastExecutedQuery(const QSqlQuery &query);
 
-    uint lokacija;
+    //uint lokacija;
     QTimer* timeoutTimer;
     QByteArray receivedData;
 };

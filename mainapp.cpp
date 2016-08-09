@@ -5,6 +5,9 @@
 #include "socketmonitor.h"
 #include "accesscontrol.h"
 #include "syncserver.h"
+#include "syncclient.h"
+#include "tcpsocket.h"
+#include "syncsocketserver.h"
 
 #include <QDebug>
 #include <QCoreApplication>
@@ -26,6 +29,7 @@ MainApp::MainApp(QObject *parent) : QObject(parent)
     QString key_db_user="DB/User";
     QString key_db_password="DB/Password";
     QString key_system_lokacija="System/Lokacija";
+    QString key_system_syncperiod="System/SyncPeriod";
 
     QSettings settings(QCoreApplication::applicationDirPath() + "/settings.ini", QSettings::IniFormat);
     if(!settings.contains(key_db_host)) settings.setValue(key_db_host, QString("localhost"));
@@ -33,12 +37,14 @@ MainApp::MainApp(QObject *parent) : QObject(parent)
     if(!settings.contains(key_db_user)) settings.setValue(key_db_user, QString("root"));
     if(!settings.contains(key_db_password)) settings.setValue(key_db_password, QString("sifrasifra"));
     if(!settings.contains(key_system_lokacija)) settings.setValue(key_system_lokacija, 1);
+    if(!settings.contains(key_system_syncperiod)) settings.setValue(key_system_syncperiod, 10);
 
     QString dbHost = settings.value(key_db_host).toString();
     QString dbName = settings.value(key_db_name).toString();
     QString dbUser = settings.value(key_db_user).toString();
     QString dbPassword = settings.value(key_db_password).toString();
     lokacija = settings.value(key_system_lokacija).toInt();
+    uint syncPeriod = settings.value(key_system_syncperiod).toInt();
 
     QSqlDatabase db = QSqlDatabase::addDatabase("QMYSQL");
     db.setHostName(dbHost);
@@ -87,14 +93,15 @@ MainApp::MainApp(QObject *parent) : QObject(parent)
         QJsonDocument doc = QJsonDocument::fromJson(query.value("parametri").toString().toUtf8());
         QJsonObject parametri = doc.object();
 
-        Socket* socket;
+        Socket* socket = NULL;
 
         if(tip=='u')
         {
             UdpSocket* udpSocket = new UdpSocket(this);
             udpSocket->setObjectName(naziv.replace(" ","_"));
-            udpSocket->setAddress(parametri["address"].toString());
-            udpSocket->setPort(parametri["port"].toInt());
+            if(!parametri["address"].isUndefined())udpSocket->setAddress(parametri["address"].toString());
+            if(!parametri["port"].isUndefined())udpSocket->setReceivePort(parametri["port"].toInt());
+            if(!parametri["sendPort"].isUndefined())udpSocket->setSendPort(parametri["sendPort"].toInt());
             socket = udpSocket;
         }
         else if(tip=='s')
@@ -106,23 +113,40 @@ MainApp::MainApp(QObject *parent) : QObject(parent)
             serialSocket->start();
             socket = serialSocket;
         }
-
-        if(funkcija=='S')   //TODO: promijeni sve ovo
+        else if(tip=='t')
         {
-            SyncServer* syncServer = new SyncServer(2,this);
-            syncServer->setObjectName("sync_server");
-            connect(socket, SIGNAL(received(QByteArray)), syncServer, SLOT(received(QByteArray)));
-            connect(syncServer, SIGNAL(write(QByteArray)), socket, SLOT(write(QByteArray)));
+            TcpSocket* tcpSocket = new TcpSocket(this);
+            tcpSocket->setObjectName(naziv.replace(" ","_"));
+            tcpSocket->setAddress(parametri["address"].toString());
+            tcpSocket->setPort(parametri["port"].toInt());
+            tcpSocket->connectToHost();
+            socket = tcpSocket;
         }
-        else if(funkcija=='s')
+        else if(tip=='T')
         {
+            if(funkcija=='S')
+            {
+                SyncSocketServer* server = new SyncSocketServer(parametri["port"].toInt(),this);
+                server->setObjectName(naziv.replace(" ","_"));
+            }
         }
 
-        SocketMonitor* socMon = new SocketMonitor(this);
-        socMon->setSocketName(socket->objectName());
-        connect(socket,SIGNAL(received(QByteArray)),socMon,SLOT(received(QByteArray)));
-        connect(socket,SIGNAL(sent(QByteArray)),socMon,SLOT(sent(QByteArray)));
-        sockets.insert(id,socket);
+        if(funkcija=='s')
+        {
+            SyncClient* syncClient = new SyncClient(lokacija,syncPeriod,this);
+            syncClient->setObjectName("sync_client");
+            connect(socket, SIGNAL(received(QByteArray)), syncClient, SLOT(received(QByteArray)));
+            connect(syncClient, SIGNAL(write(QByteArray)), socket, SLOT(write(QByteArray)));
+        }
+
+        if(socket!=NULL)
+        {
+            SocketMonitor* socMon = new SocketMonitor(this);
+            socMon->setSocketName(socket->objectName());
+            connect(socket,SIGNAL(received(QByteArray)),socMon,SLOT(received(QByteArray)));
+            connect(socket,SIGNAL(sent(QByteArray)),socMon,SLOT(sent(QByteArray)));
+            sockets.insert(id,socket);
+        }
     }
     query.clear();
 
@@ -178,6 +202,7 @@ MainApp::MainApp(QObject *parent) : QObject(parent)
                 connect(ac,SIGNAL(accessGranted()),kontroleri[kontroler],SLOT(openDoor()));
             }
         }
+        //TODO: funkcija=='t'
 
         citaci.insert(id,citac);
     }

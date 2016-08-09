@@ -12,6 +12,8 @@ UdpSocket::UdpSocket(QObject *parent)
     connect(socket, &QUdpSocket::stateChanged, [&](QAbstractSocket::SocketState state){ qDebug() << this->objectName() << " SocketState: " << state;});
 //    connect(this, &UdpSocket::error, [&](QAbstractSocket::SocketError error){ qDebug() << this->objectName() << " SocketError: " << error;});
 
+    sendPort = 0;
+    receivePort = 0;
 }
 
 void UdpSocket::fetchData()
@@ -26,21 +28,21 @@ void UdpSocket::fetchData()
     }
 }
 
-int UdpSocket::getPort()
+int UdpSocket::getReceivePort()
 {
-    return port;
+    return receivePort;
 }
 
-void UdpSocket::setPort(int p)
+void UdpSocket::setReceivePort(int p)
 {
-    if(port != p){
+    if(receivePort != p){
         if(socket->state() != QAbstractSocket::UnconnectedState) socket->close();
         if(!socket->bind(p)){
             qCritical() << objectName() << " greska podizanja udp servera na portu " << p;
             return;
         }
-        port = p;
-        Q_EMIT portChanged(p);
+        receivePort = p;
+        Q_EMIT receivePortChanged(p);
     }
 }
 
@@ -65,7 +67,22 @@ void UdpSocket::read(QByteArray data)
 
 void UdpSocket::write(QByteArray data)
 {
-    socket->writeDatagram(data, (QHostAddress)address, port);
+    if(!sendPort) setSendPort(receivePort);
+
+    socket->writeDatagram(data, (QHostAddress)address, sendPort);
     Q_EMIT sent(data);
+}
+
+int UdpSocket::getSendPort() const
+{
+    return sendPort;
+}
+
+void UdpSocket::setSendPort(int p)
+{
+    if(sendPort != p){
+        sendPort = p;
+        Q_EMIT sendPortChanged(p);
+    }
 }
 

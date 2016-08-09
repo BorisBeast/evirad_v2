@@ -1,5 +1,11 @@
 #include "syncclient.h"
 
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QSqlQuery>
+#include <QDebug>
+
 SyncClient::SyncClient(uint lokacija, uint syncPeriod, QObject *parent) : QObject(parent)
 {
     this->lokacija = lokacija;
@@ -11,9 +17,10 @@ SyncClient::SyncClient(uint lokacija, uint syncPeriod, QObject *parent) : QObjec
     connect(timeoutTimer,SIGNAL(timeout()),this,SLOT(timeoutTimerTimeout()));
 
     syncTimer = new QTimer(this);
-    syncTimer->setSingleShot(true);
-    syncTimer->setInterval(syncPeriod);
+    syncTimer->setSingleShot(false);  //TODO: ovo treba da bude true, a onda treba dodati timeout za zahtjev
+    syncTimer->setInterval(syncPeriod * 1000);
     connect(syncTimer,SIGNAL(timeout()),this,SLOT(syncTimerTimeout()));
+    syncTimer->start();
 }
 
 void SyncClient::received(QByteArray data)
@@ -64,10 +71,88 @@ void SyncClient::timeoutTimerTimeout()
 
 void SyncClient::syncTimerTimeout()
 {
+    QVariant syncTime(QVariant::String);
+    QSqlQuery query;
+    QString strQuery = "SELECT vrijednost FROM parametri WHERE naziv='sync_time' AND lokacija=" + QString::number(this->lokacija);
+    qDebug()<<strQuery;
+    query.exec(strQuery);
+    if(query.next())
+    {
+        syncTime = query.value("vrijednost");
+    }
 
+    QJsonObject request;
+    request.insert("date", syncTime.isNull()?QJsonValue():QJsonValue(syncTime.toString()));
+    request.insert("location", QJsonValue((int)this->lokacija) );
+
+    QJsonDocument docRequest(request);
+
+    emit write(docRequest.toJson(QJsonDocument::Compact));  //posalji zahtjev
 }
 
 void SyncClient::parseData(QString data)
 {
+    qDebug()<<"Primljeno"<<data;
 
+    QJsonDocument doc = QJsonDocument::fromJson(data.toUtf8());
+    QJsonObject message = doc.object();
+
+    QSqlQuery query;
+    query.exec("SET FOREIGN_KEY_CHECKS=0;");       //TODO: makni ovo !!!!
+
+
+    //TODO: dodaj transakciju da bi u slucaju greske rollback
+
+    //TODO: redosled tabela za insert i delete    (insert treba da ima obrnut redosled od delete)
+
+    if(!message.value("insert").isUndefined() && !message.value("insert").toObject().value("citac").isUndefined())
+    {
+        QString strQuery = "INSERT INTO citac(id, naziv, funkcija, zona, lokacija, registracija_vremena, kontroler, socket, adresa) VALUES ";
+
+        uint i=0;
+        QJsonArray insertArray = message.value("insert").toObject().value("citac").toArray();
+        foreach (QJsonValue val, insertArray) {
+            QJsonObject insertObj = val.toObject();
+            if(i++!=0) strQuery+=",";
+            strQuery+=QString("(%1,'%2','%3',%4,%5,%6,%7,%8,%9)")
+                    .arg(insertObj["id"].toInt())
+                    .arg(insertObj["naziv"].toString())
+                    .arg(insertObj["funkcija"].toString())
+                    .arg(insertObj["zona"].toInt())
+                    .arg(insertObj["lokacija"].toInt())
+                    .arg(insertObj["registracija_vremena"].toBool())
+                    .arg(insertObj["kontroler"].isNull()?QString("NULL"):QString::number(insertObj["kontroler"].toInt()))
+                    .arg(insertObj["socket"].toInt())
+                    .arg(insertObj["adresa"].toString());
+        }
+
+        strQuery += " ON DUPLICATE KEY UPDATE naziv=VALUES(naziv), funkcija=VALUES(funkcija), zona=VALUES(zona), lokacija=VALUES(lokacija), registracija_vremena=VALUES(registracija_vremena), kontroler=VALUES(kontroler), socket=VALUES(socket), adresa=VALUES(adresa);";
+        qDebug()<<strQuery;
+        query.exec(strQuery);
+        query.clear();
+    }
+    //TODO: insert ostale tabele
+
+    if(!message.value("delete").isUndefined() && !message.value("delete").toObject().value("citac").isUndefined())
+    {
+        QString strQuery = "DELETE FROM citac WHERE id IN (";
+
+        uint i=0;
+        QJsonArray deleteArray = message.value("delete").toObject().value("citac").toArray();
+        foreach (QJsonValue val, deleteArray) {
+            if(i++!=0) strQuery+=",";
+            strQuery += QString::number(val.toInt());
+        }
+
+        strQuery += ")";
+        qDebug()<<strQuery;
+        query.exec(strQuery);
+        query.clear();
+    }
+    //TODO: delete ostale tabele
+
+    QString date = message.value("requestTime").toString();
+    QString strQuery = "UPDATE parametri SET vrijednost='" + date + "' WHERE naziv='sync_time' AND lokacija=" + QString::number(this->lokacija);
+    qDebug()<<strQuery;
+    query.exec(strQuery);
 }

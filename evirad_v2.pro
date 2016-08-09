@@ -19,7 +19,8 @@ SOURCES += main.cpp \
     accesscontrol.cpp \
     socketmonitor.cpp \
     syncserver.cpp \
-    syncclient.cpp
+    syncclient.cpp \
+    syncsocketserver.cpp
 
 HEADERS += \
     mainapp.h \
@@ -29,7 +30,8 @@ HEADERS += \
     accesscontrol.h \
     socketmonitor.h \
     syncserver.h \
-    syncclient.h
+    syncclient.h \
+    syncsocketserver.h
 
 target.path = /home/pi/Projekti
 INSTALLS += target

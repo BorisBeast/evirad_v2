@@ -8,18 +8,22 @@ class UdpSocket : public Socket
 {
     Q_OBJECT
     Q_INTERFACES(Socket)
-    Q_PROPERTY(int port READ getPort WRITE setPort NOTIFY portChanged)
+    Q_PROPERTY(int receivePort READ getReceivePort WRITE setReceivePort NOTIFY receivePortChanged)
+    Q_PROPERTY(int sendPort READ getSendPort WRITE setSendPort NOTIFY sendPortChanged)
     Q_PROPERTY(QString address READ getAddress WRITE setAddress NOTIFY addressChanged)
 public:
     Q_INVOKABLE explicit UdpSocket(QObject *parent = 0);
-    
+
 signals:
-    void portChanged(int);
+    void receivePortChanged(int);
+    void sendPortChanged(int);
     void addressChanged(QString);
 
 public slots:
-    int getPort();
-    void setPort(int);
+    int getReceivePort();
+    void setReceivePort(int);
+    int getSendPort() const;
+    void setSendPort(int value);
     QString getAddress();
     void setAddress(QString);
     void fetchData();
@@ -30,7 +34,8 @@ public Q_SLOTS:
     void write(QByteArray) Q_DECL_OVERRIDE;
 //----------------------------------------------
 protected:
-    int port;
+    int receivePort;
+    int sendPort;
     QString address;
 
 private:

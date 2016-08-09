@@ -8,9 +8,9 @@
 #include <QVariant>
 #include <QDebug>
 
-SyncServer::SyncServer(uint lokacija, QObject *parent) : QObject(parent)
+SyncServer::SyncServer(QObject *parent) : QObject(parent)
 {
-    this->lokacija = lokacija;
+    //this->lokacija = lokacija;
 
     timeoutTimer = new QTimer(this);
     timeoutTimer->setSingleShot(true);
@@ -76,15 +76,28 @@ void SyncServer::parseData(QString data)    //TODO: napravi genericku funkciju k
     if(message.value("date").isUndefined()) {qCritical()<<"date undefined!"; return;}
     if(message.value("location").isUndefined()) {qCritical()<<"location undefined!"; return;}
 
+    uint lokacija = message.value("location").toInt();
+
     response.insert("date", message.value("date"));
     response.insert("location", message.value("location"));
+
+    QSqlQuery query;
+    query.exec("SELECT DATE_FORMAT(NOW(),'%Y-%m-%d %H:%i:%s') AS request_time");
+    query.next();
+    QString requestTime = query.value("request_time").toString();
+    query.clear();
+
+    response.insert("requestTime", QJsonValue(requestTime));
+    QString strQuery = "UPDATE parametri SET vrijednost='" + requestTime + "' WHERE naziv='sync_time' AND lokacija=" + QString::number(lokacija);
+    qDebug()<<strQuery;
+    query.exec(strQuery);
 
     if(message.value("date").isNull())
     {
         QJsonObject insertObj;
-        QSqlQuery query;
 
         QJsonArray tabelaCitac;
+        query.setForwardOnly(true);
         query.exec("SELECT id, naziv, funkcija, zona, lokacija, registracija_vremena, kontroler, socket, adresa FROM citac");
         qDebug()<<getLastExecutedQuery(query);
         while(query.next())
@@ -103,6 +116,7 @@ void SyncServer::parseData(QString data)    //TODO: napravi genericku funkciju k
 
             tabelaCitac.append(citac);
         }
+        query.clear();
         insertObj.insert("citac", tabelaCitac);
 
         //TODO: ostale tabele
@@ -113,50 +127,52 @@ void SyncServer::parseData(QString data)    //TODO: napravi genericku funkciju k
     {
         //QDateTime date = QDateTime::fromString(message.value("date").toString(), "yyyy-MM-dd HH:mm:ss");
         QString date = message.value("date").toString();
-        //TODO: posalji promijenjene stvari
 
         QHash<QString,QSet<quint64>*> insertHash;
-        QHash<QString,QSet<quint64>*> updateHash;
         QHash<QString,QSet<quint64>*> deleteHash;
-        
-        QSqlQuery query;
-        query.prepare("SELECT tabela, edit_type, edit_id FROM sync_edit_info WHERE vrijeme>=:date");
+
+        query.setForwardOnly(true);
+        query.prepare("SELECT tabela, edit_type, edit_id FROM sync_edit_info WHERE vrijeme>=:date AND vrijeme<:request_time");
         query.bindValue(":date", date);
+        query.bindValue(":request_time",requestTime);
         query.exec();
         qDebug()<<getLastExecutedQuery(query);
         while(query.next())
         {
             char editType = query.value("edit_type").toString().at(0).toLatin1();
             QHash<QString,QSet<quint64>*>* hash;
-            if(editType=='i') hash=&insertHash;
-            else if(editType=='u') hash=&updateHash;
+            if(editType=='i' || editType=='u') hash=&insertHash;
             else hash=&deleteHash;
 
             QString tabela = query.value("tabela").toString();
             if(!hash->contains(tabela))hash->insert(tabela, new QSet<quint64>());
 
             hash->value(tabela)->insert(query.value("edit_id").toULongLong());
+
+
         }
+        query.clear();
 
         QJsonObject insertObj;
-        QJsonObject updateObj;
         QJsonObject deleteObj;
-        QHash<quint64, QJsonObject> objekti;
-        if(insertHash.contains("citac") || updateHash.contains("citac") || deleteHash.contains("citac"))
+        //QHash<quint64, QJsonObject> objekti;
+        if(insertHash.contains("citac"))
         {
-            QSet<quint64> allIds;
-            if(insertHash.contains("citac")) allIds+=*(insertHash.value("citac"));
-            if(updateHash.contains("citac")) allIds+=*(updateHash.value("citac"));
+            //QSet<quint64> allIds;
+            //if(insertHash.contains("citac")) allIds+=*(insertHash.value("citac"));
             //za delete id-eve ne mora da se radi SELECT
 
             QString ids; bool first=true;
-            foreach (quint64 id, allIds) {
+            //foreach (quint64 id, allIds) {
+            foreach (quint64 id, *(insertHash.value("citac"))) {
                 if(!first) ids+=",";
                 first=false;
                 ids+=QString::number(id);
             }
 
-            objekti.clear();
+            //objekti.clear();
+            QJsonArray tabelaInsert;
+            query.setForwardOnly(true);
             query.exec("SELECT id, naziv, funkcija, zona, lokacija, registracija_vremena, kontroler, socket, adresa FROM citac WHERE id IN (" + ids + ")");
             qDebug()<<getLastExecutedQuery(query);
             while(query.next())
@@ -174,21 +190,20 @@ void SyncServer::parseData(QString data)    //TODO: napravi genericku funkciju k
                 citac.insert("socket", QJsonValue((int)query.value("socket").toUInt()) );
                 citac.insert("adresa", QJsonValue(query.value("adresa").toString()) );
 
-                objekti.insert(id, citac);
+                //objekti.insert(id, citac);
+                tabelaInsert.append(citac);
             }
+            query.clear();
 
-            QJsonArray tabelaInsert;
-            foreach (quint64 id, *(insertHash.value("citac"))) {
+
+            /*foreach (quint64 id, *(insertHash.value("citac"))) {
                 if(objekti.contains(id)) tabelaInsert.append(objekti.value(id));
-            }
+            }*/
+
             insertObj.insert("citac", tabelaInsert);
-
-            QJsonArray tabelaUpdate;
-            foreach (quint64 id, *(updateHash.value("citac"))) {
-                if(objekti.contains(id)) tabelaUpdate.append(objekti.value(id));
-            }
-            updateObj.insert("citac", tabelaUpdate);
-
+        }
+        if(deleteHash.contains("citac"))
+        {
             QJsonArray tabelaDelete;
             foreach (quint64 id, *(deleteHash.value("citac"))) {
                 tabelaDelete.append(QJsonValue((qint64)id));
@@ -196,8 +211,9 @@ void SyncServer::parseData(QString data)    //TODO: napravi genericku funkciju k
             deleteObj.insert("citac", tabelaDelete);
         }
 
+        //TODO: ostale tabele
+
         response.insert("insert", insertObj);
-        response.insert("update", updateObj);
         response.insert("delete", deleteObj);
     }
 
